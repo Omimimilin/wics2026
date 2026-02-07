@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "festmap",
-    "slug": "festmap",
+    "slug": "fest-map",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -43,6 +43,13 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "25a04b35-8322-44b5-9d53-40c32b00b94a"
+      }
+    },
+    "owner": "omimimis-organization"
   }
 }

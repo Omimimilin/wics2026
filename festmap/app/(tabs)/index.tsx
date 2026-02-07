@@ -1,98 +1,235 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import { Platform } from "react-native";
 
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+import { useEffect, useMemo, useState } from "react";
+import { View, Text, Pressable, ScrollView } from "react-native";
+import MapView, { Marker } from "react-native-maps";
+import * as Location from "expo-location";
+import { supabase } from "../../lib/supabase";
 
-export default function HomeScreen() {
+type PostRow = {
+  id: string;
+  media_url: string;
+  media_type: "image" | "video";
+  caption: string | null;
+  tag: string | null;
+  lat: number;
+  lng: number;
+  created_at: string;
+  expires_at: string | null;
+};
+
+type Hotspot = {
+  key: string;
+  count: number;
+  lat: number;
+  lng: number;
+};
+
+// const FESTIVAL_ID = "acl_demo"; // change later if you add festival selector
+const LOOKBACK_MINUTES = 60;
+const HOTSPOT_WINDOW_MINUTES = 15;
+
+// ~200m-ish grid (rough; good enough for hackathon)
+const CELL_SIZE = 0.002;
+
+export default function TabOneScreen() {
+  const [region, setRegion] = useState<any>(null);
+  const [posts, setPosts] = useState<PostRow[]>([]);
+  const [status, setStatus] = useState<string>("Loading…");
+  const [permissionDenied, setPermissionDenied] = useState(false);
+
+  // 1) Get user location and set initial region
+  useEffect(() => {
+    (async () => {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== "granted") {
+        setPermissionDenied(true);
+        setStatus("Location permission denied");
+        return;
+      }
+
+      const loc = await Location.getCurrentPositionAsync({});
+      setRegion({
+        latitude: loc.coords.latitude,
+        longitude: loc.coords.longitude,
+        latitudeDelta: 0.02,
+        longitudeDelta: 0.02,
+      });
+    })();
+  }, []);
+
+  if (Platform.OS === "web") {
+    return (
+      <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 16 }}>
+        <Text style={{ fontSize: 18, fontWeight: "600", marginBottom: 8 }}>
+          FestMap runs on mobile
+        </Text>
+        <Text>
+          Open this app in Expo Go on iOS/Android to view the live map.
+        </Text>
+      </View>
+    );
+  }
+
+  // 2) Fetch posts (poll every 10s)
+  useEffect(() => {
+    let timer: any;
+
+    async function fetchPosts() {
+      try {
+        setStatus("Loading pins…");
+        const since = new Date(Date.now() - LOOKBACK_MINUTES * 60 * 1000).toISOString();
+
+        let q = supabase
+          .from("posts")
+          .select("id, media_url, media_type, caption, tag, lat, lng, created_at, expires_at")
+          .gt("created_at", since)
+          .order("created_at", { ascending: false })
+          .limit(250);
+
+        // If you DID NOT add festival_id column, comment this out:
+        // q = q.eq("festival_id", FESTIVAL_ID);
+
+        const { data, error } = await q;
+        if (error) throw error;
+
+        setPosts((data as any[]) ?? []);
+        setStatus(`Loaded ${data?.length ?? 0} pins`);
+      } catch (e: any) {
+        console.log("Fetch posts error:", e);
+        setStatus(`Error loading pins: ${e?.message ?? "unknown error"}`);
+      }
+    }
+
+    fetchPosts();
+    timer = setInterval(fetchPosts, 10000);
+
+    return () => clearInterval(timer);
+  }, []);
+
+  // 3) Compute hotspots from posts in the last HOTSPOT_WINDOW_MINUTES
+  const hotspots: Hotspot[] = useMemo(() => {
+    const cutoff = Date.now() - HOTSPOT_WINDOW_MINUTES * 60 * 1000;
+
+    const buckets = new Map<
+      string,
+      { count: number; sumLat: number; sumLng: number }
+    >();
+
+    for (const p of posts) {
+      const t = new Date(p.created_at).getTime();
+      if (t < cutoff) continue;
+
+      const cellX = Math.floor(p.lat / CELL_SIZE);
+      const cellY = Math.floor(p.lng / CELL_SIZE);
+      const key = `${cellX}:${cellY}`;
+
+      const cur = buckets.get(key) ?? { count: 0, sumLat: 0, sumLng: 0 };
+      cur.count += 1;
+      cur.sumLat += p.lat;
+      cur.sumLng += p.lng;
+      buckets.set(key, cur);
+    }
+
+    const out: Hotspot[] = Array.from(buckets.entries())
+      .map(([key, v]) => ({
+        key,
+        count: v.count,
+        lat: v.sumLat / v.count,
+        lng: v.sumLng / v.count,
+      }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 3);
+
+    return out;
+  }, [posts]);
+
+  if (permissionDenied) {
+    return (
+      <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+        <Text>Location permission denied. Enable location to use the map.</Text>
+      </View>
+    );
+  }
+
+  if (!region) {
+    return (
+      <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+        <Text>Getting location…</Text>
+      </View>
+    );
+  }
+
   return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+    <View style={{ flex: 1 }}>
+      <MapView style={{ flex: 1 }} initialRegion={region} showsUserLocation>
+        {posts.map((p) => (
+          <Marker
+            key={p.id}
+            coordinate={{ latitude: p.lat, longitude: p.lng }}
+            title={p.tag ?? "Post"}
+            description={p.caption ?? ""}
+          />
+        ))}
+      </MapView>
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+      {/* Bottom panel: status + hotspots */}
+      <View
+        style={{
+          position: "absolute",
+          left: 12,
+          right: 12,
+          bottom: 12,
+          padding: 12,
+          borderRadius: 16,
+          backgroundColor: "rgba(0,0,0,0.75)",
+        }}
+      >
+        <Text style={{ color: "white", fontSize: 14, marginBottom: 8 }}>
+          {status}
+        </Text>
+
+        <Text style={{ color: "white", fontSize: 16, fontWeight: "600" }}>
+          Hot Spots (last {HOTSPOT_WINDOW_MINUTES} min)
+        </Text>
+
+        {hotspots.length === 0 ? (
+          <Text style={{ color: "white", marginTop: 6, opacity: 0.85 }}>
+            No hotspots yet — create a few posts to see this light up.
+          </Text>
+        ) : (
+          <ScrollView horizontal style={{ marginTop: 8 }}>
+            {hotspots.map((h, idx) => (
+              <Pressable
+                key={h.key}
+                onPress={() => {
+                  // Zoom map to hotspot (approx)
+                  setRegion({
+                    latitude: h.lat,
+                    longitude: h.lng,
+                    latitudeDelta: 0.01,
+                    longitudeDelta: 0.01,
+                  });
+                }}
+                style={{
+                  marginRight: 10,
+                  paddingVertical: 8,
+                  paddingHorizontal: 12,
+                  borderRadius: 14,
+                  backgroundColor: "rgba(255,255,255,0.15)",
+                }}
+              >
+                <Text style={{ color: "white", fontWeight: "700" }}>
+                  Hot Spot #{idx + 1}
+                </Text>
+                <Text style={{ color: "white", opacity: 0.9 }}>
+                  {h.count} posts
+                </Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        )}
+      </View>
+    </View>
   );
 }
-
-const styles = StyleSheet.create({
-  titleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
-  },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
-  },
-});

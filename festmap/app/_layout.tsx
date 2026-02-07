@@ -1,3 +1,4 @@
+console.log("SUPABASE URL:", process.env.EXPO_PUBLIC_SUPABASE_URL);
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
