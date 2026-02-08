@@ -14,6 +14,7 @@ import * as Location from "expo-location";
 import { uploadPhotoToSupabase, insertPostRow } from "../lib/posts";
 import { ScrollView, KeyboardAvoidingView } from "react-native";
 import * as ImagePicker from "expo-image-picker";
+import React from "react";
 
 export default function NewPost() {
   const router = useRouter();
