@@ -261,7 +261,7 @@ export default function TabOneScreen() {
     return posts.filter((p) => {
       const t = new Date(p.created_at).getTime();
       if (t < cutoff) return false;
-      
+
       const cellX = Math.floor(p.lat / CELL_SIZE);
       const cellY = Math.floor(p.lng / CELL_SIZE);
       const key = `${cellX}:${cellY}`;
@@ -329,6 +329,25 @@ export default function TabOneScreen() {
             coordinate={{ latitude: p.lat, longitude: p.lng }}
             title={p.tag ?? "Post"}
             description={p.caption ?? ""}
+            onPress={() => {
+              // Get all posts in the same grid cell
+              const cellX = Math.floor(p.lat / CELL_SIZE);
+              const cellY = Math.floor(p.lng / CELL_SIZE);
+              const key = `${cellX}:${cellY}`;
+
+              const relatedPosts = posts.filter(post => {
+                const postCellX = Math.floor(post.lat / CELL_SIZE);
+                const postCellY = Math.floor(post.lng / CELL_SIZE);
+                const postKey = `${postCellX}:${postCellY}`;
+
+                const cutoff = Date.now() - HOTSPOT_WINDOW_MINUTES * 60 * 1000;
+                const postTime = new Date(post.created_at).getTime();
+                return postKey === key && postTime >= cutoff;
+              });
+
+              setHotspotPosts(relatedPosts);
+              showSheet();
+            }}
           />
         ))}
       </MapView>
@@ -497,7 +516,7 @@ export default function TabOneScreen() {
 
         {hotspots.length === 0 ? (
           <Text style={{ color: "white", marginTop: 6, opacity: 0.85 }}>
-            No hotspots yet — post a few photos in the same area.
+            No hotspots yet.
           </Text>
         ) : (
           <ScrollView horizontal style={{ marginTop: 8 }}>
