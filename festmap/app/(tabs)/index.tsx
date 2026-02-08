@@ -2,8 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { View, Text, Pressable, ScrollView, Platform } from "react-native";
 import MapView, { Marker } from "react-native-maps";
 import * as Location from "expo-location";
-import * as ImagePicker from "expo-image-picker";
 import { supabase } from "../../lib/supabase";
+import React from "react";
 
 type PostRow = {
   id: string;
@@ -28,24 +28,6 @@ const FESTIVAL_ID = "acl_demo";
 const LOOKBACK_MINUTES = 60;
 const HOTSPOT_WINDOW_MINUTES = 15;
 const CELL_SIZE = 0.002; // ~200m-ish grid (good enough for hackathon)
-
-async function uploadPhotoToSupabase(uri: string, festivalId: string) {
-  const res = await fetch(uri);
-  const arrayBuffer = await res.arrayBuffer();
-
-  const filePath = `${festivalId}/${Date.now()}-${Math.random()
-    .toString(16)
-    .slice(2)}.jpg`;
-
-  const { error: uploadError } = await supabase.storage
-    .from("posts")
-    .upload(filePath, arrayBuffer, { contentType: "image/jpeg", upsert: false });
-
-  if (uploadError) throw uploadError;
-
-  const { data } = supabase.storage.from("posts").getPublicUrl(filePath);
-  return data.publicUrl;
-}
 
 async function insertPostRow(params: {
   mediaUrl: string;
@@ -100,7 +82,6 @@ export default function TabOneScreen() {
   const [posts, setPosts] = useState<PostRow[]>([]);
   const [status, setStatus] = useState<string>("Loading…");
   const [permissionDenied, setPermissionDenied] = useState(false);
-  const [posting, setPosting] = useState(false);
 
   // 1) Location + initial region
   useEffect(() => {
@@ -169,7 +150,6 @@ export default function TabOneScreen() {
     fetchPostsNow();
     const timer = setInterval(fetchPostsNow, 10000);
     return () => clearInterval(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // 4) Hotspots (last HOTSPOT_WINDOW_MINUTES)
@@ -203,61 +183,6 @@ export default function TabOneScreen() {
       .sort((a, b) => b.count - a.count)
       .slice(0, 3);
   }, [posts]);
-
-  // 5) Post photo handler
-  async function handlePostPhoto() {
-    if (posting) return;
-
-    try {
-      setPosting(true);
-      setStatus("Opening camera…");
-
-      const camPerm = await ImagePicker.requestCameraPermissionsAsync();
-      if (!camPerm.granted) {
-        setStatus("Camera permission denied");
-        return;
-      }
-
-      const result = await ImagePicker.launchCameraAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        quality: 0.7,
-      });
-
-      if (result.canceled) {
-        setStatus("Canceled");
-        return;
-      }
-
-      // Get a fresh GPS reading for accurate pinning
-      setStatus("Getting location…");
-      const loc = await Location.getCurrentPositionAsync({});
-      const lat = loc.coords.latitude;
-      const lng = loc.coords.longitude;
-
-      // Upload + insert
-      setStatus("Uploading photo…");
-      const uri = result.assets[0].uri;
-      const mediaUrl = await uploadPhotoToSupabase(uri, FESTIVAL_ID);
-
-      setStatus("Saving pin…");
-      await insertPostRow({
-        mediaUrl,
-        lat,
-        lng,
-        caption: "",
-        tag: "stage",
-        festivalId: FESTIVAL_ID,
-      });
-
-      setStatus("✅ Posted!");
-      await fetchPostsNow(); // immediate refresh so pins/hotspots update now
-    } catch (e: any) {
-      console.log("Post error:", e);
-      setStatus(`Post failed: ${e?.message ?? "unknown error"}`);
-    } finally {
-      setPosting(false);
-    }
-  }
 
   if (permissionDenied) {
     return (
@@ -293,24 +218,6 @@ export default function TabOneScreen() {
           />
         ))}
       </MapView>
-
-      {/* Floating Post Button */}
-      <Pressable
-        onPress={handlePostPhoto}
-        style={{
-          position: "absolute",
-          right: 18,
-          bottom: 110,
-          width: 56,
-          height: 56,
-          borderRadius: 28,
-          alignItems: "center",
-          justifyContent: "center",
-          backgroundColor: posting ? "rgba(255,255,255,0.6)" : "white",
-        }}
-      >
-        <Text style={{ fontSize: 28, fontWeight: "700" }}>{posting ? "…" : "+"}</Text>
-      </Pressable>
 
       {/* Bottom panel */}
       <View
