@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { View, Text, Pressable, ScrollView, Platform } from "react-native";
+import { View, Text, Pressable, ScrollView, Platform, TouchableOpacity } from "react-native";
 import MapView, { Marker } from "react-native-maps";
 import * as Location from "expo-location";
 import { supabase } from "../../lib/supabase";
@@ -7,6 +7,7 @@ import axios from "axios";
 import { TextInput } from "react-native-gesture-handler";
 import Animated, { useSharedValue, useAnimatedStyle, withSpring } from "react-native-reanimated";
 import { PanGestureHandler, GestureHandlerRootView } from "react-native-gesture-handler"
+import { IconSymbol } from "@/components/ui/icon-symbol";
 
 type PostRow = {
   id: string;
@@ -39,6 +40,7 @@ const LOOKBACK_MINUTES = 60;
 const HOTSPOT_WINDOW_MINUTES = 15;
 const CELL_SIZE = 0.002; // ~200m-ish grid (good enough for hackathon)
 const SERPAPI_KEY = process.env.EXPO_PUBLIC_SERPAPI_KEY;
+const DEBUG = false;
 
 async function insertPostRow(params: {
   mediaUrl: string;
@@ -135,6 +137,8 @@ export default function TabOneScreen() {
   const [permissionDenied, setPermissionDenied] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [hotspotPosts, setHotspotPosts] = useState<PostRow[]>([]);
 
   const bottomSheetHeight = 400;
   const translateY = useSharedValue(bottomSheetHeight);
@@ -251,9 +255,26 @@ export default function TabOneScreen() {
       .slice(0, 3);
   }, [posts]);
 
+  function getPostsForHotspot(h: Hotspot) {
+    const cutoff = Date.now() - HOTSPOT_WINDOW_MINUTES * 60 * 1000;
+
+    return posts.filter((p) => {
+      const t = new Date(p.created_at).getTime();
+      if (t < cutoff) return false;
+      
+      const cellX = Math.floor(p.lat / CELL_SIZE);
+      const cellY = Math.floor(p.lng / CELL_SIZE);
+      const key = `${cellX}:${cellY}`;
+      return key === h.key;
+    })
+  }
+
   // Search
   async function handleSearch() {
     if (!searchQuery || !region) return;
+
+    setIsSearching(true);
+    setHotspotPosts([]);
 
     const results = await searchPlaces(searchQuery, region ? { lat: region.latitude, lng: region.longitude } : undefined);
     setSearchResults(results);
@@ -268,6 +289,13 @@ export default function TabOneScreen() {
       setRegion(newRegion);
       mapRef.current?.animateToRegion(newRegion, 500);
     }
+  }
+
+  const clearSearch = () => {
+    setSearchQuery("");
+    setSearchResults([]);
+    setIsSearching(false);
+    hideSheet();
   }
 
   if (permissionDenied) {
@@ -313,22 +341,45 @@ export default function TabOneScreen() {
           width: "90%",
           alignSelf: "center",
           zIndex: 10,
+          backgroundColor: "white",
+          paddingHorizontal: 12,
+          paddingVertical: 12,
+          borderRadius: 20,
+          flexDirection: "row",
+          alignItems: "center",
         }}
         >
+          {/* Menu Icon*/}
+          <TouchableOpacity style={{ marginRight: 8 }}>
+            <IconSymbol size={28} name="line.horizontal.3" color="#000"></IconSymbol>
+          </TouchableOpacity>
+
           <TextInput
             placeholder="Search places..."
             value={searchQuery}
+            onFocus={() => {
+              hideSheet();
+              setHotspotPosts([]);
+            }}
             onChangeText={setSearchQuery}
             onSubmitEditing={handleSearch}
             placeholderTextColor="#000"
             style={{
-              backgroundColor: "white",
-              paddingHorizontal: 12,
-              paddingVertical: 12,
-              borderRadius: 20,
+              flex: 1,
               fontSize:16,
             }}
           />
+
+          {/* Search Icon*/}
+          {isSearching ? (
+            <TouchableOpacity onPress={clearSearch} style={{ marginLeft: 8 }}>
+              <IconSymbol size={26} name="xmark" color="#000" />
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity onPress={handleSearch} style={{ marginRight: 8 }}>
+              <IconSymbol size={26} name="magnifyingglass" color="#000"></IconSymbol>
+            </TouchableOpacity>
+          )}
       </View>
 
       {/* Bottom panel */}
@@ -376,7 +427,37 @@ export default function TabOneScreen() {
           />
 
           <ScrollView>
-            {searchResults.map((r, idx) => (
+            {hotspotPosts.length > 0 ? (
+              hotspotPosts.map((p) => (
+                <Pressable
+                  key={p.id}
+                  style={{
+                    padding: 8,
+                    borderBottomWidth: 1,
+                    borderBottomColor: "#ddd",
+                  }}
+                >
+                  <Text style={{ fontWeight: "600", marginBottom: 4 }}>
+                    {p.tag ?? "Post"}
+                  </Text>
+
+                  <Animated.Image
+                    source={{ uri: p.media_url }}
+                    style={{
+                      width: "100%",
+                      height: 200,
+                      borderRadius: 12,
+                      marginBottom: 6,
+                    }}
+                   resizeMode="cover"
+                  />
+
+                  {p.caption && (
+                    <Text style={{ color: "#555" }}>{p.caption}</Text>
+                  )}
+                </Pressable>
+              ))
+            ): (searchResults.map((r, idx) => (
               <Pressable
                 key={idx}
                 onPress={() => {
@@ -400,13 +481,16 @@ export default function TabOneScreen() {
                 <Text style={{ fontWeight: "600" }}>{r.name}</Text>
                 <Text style={{ color: "#555" }}>{r.address}</Text>
               </Pressable>
-            ))}
+              ))
+            )}
           </ScrollView>
         </Animated.View>
       </PanGestureHandler>
       
       <View style ={{ position: "absolute", top: 150, left: 12, right: 12}}>
-        <Text style={{ color: "white", fontSize: 14, marginBottom: 8 }}>{status}</Text>
+        {DEBUG && (
+          <Text style={{ color: "white", fontSize: 14, marginBottom: 8 }}>{status}</Text>
+        )}
         <Text style={{ color: "white", fontSize: 16, fontWeight: "600" }}>
           Hot Spots (last {HOTSPOT_WINDOW_MINUTES} min)
         </Text>
@@ -429,6 +513,11 @@ export default function TabOneScreen() {
                   };
                   setRegion(newRegion);
                   mapRef.current?.animateToRegion(newRegion, 350);
+
+                  setHotspotPosts([]);
+                  const relatedPosts = getPostsForHotspot(h);
+                  setHotspotPosts(relatedPosts);
+                  showSheet();
                 }}
                 style={{
                   marginRight: 10,
